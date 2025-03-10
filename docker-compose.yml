@@ -1,0 +1,36 @@
+services:
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    networks:
+      - blockim-net
+    ports:
+      - "8080:8080"
+    environment:
+      - BLOCKIM_API_URL=https://the-one-api.dev/v2/quote
+      - BLOCKIM_API_KEY=${API_KEY}
+      - BLOCKIM_SERVER_SECRET=${SERVER_SECRET}
+      - BLOCKIM_POW_DIFFICULTY=${POW_DIFFICULTY:-20}
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "8080"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  client:
+    build:
+      context: .
+      dockerfile: Dockerfile.client
+    networks:
+      - blockim-net
+    environment:
+      - SERVER_ADDR=server:8080
+    depends_on:
+      server:
+        condition: service_healthy
+    restart: "no"
+
+networks:
+  blockim-net:
+    driver: bridge 
