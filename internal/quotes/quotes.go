@@ -64,17 +64,26 @@ func NewsService(apiURL string, apiKey string) *Service {
 }
 
 func (s *Service) initQuotes() error {
+	if s.apiKey == "" || s.apiKey == "PUT_YOUR_VALID_API_KEY_HERE" {
+		log.Printf("No valid API key provided, using fallback quotes")
+		s.quotesMu.Lock()
+		s.quotes = fallbackQuotes
+		s.quotesMu.Unlock()
+		s.initialized = true
+		return nil
+	}
+
 	req, err := http.NewRequest("GET", s.ApiURL, nil)
 	if err != nil {
 		return fmt.Errorf("request creation error: %v", err)
 	}
 	log.Printf("making request to %s", s.ApiURL)
+	log.Printf("with api key %s", s.apiKey)
 	req.Header.Add("Accept", "application/json")
 	req.Header.Add("Authorization", "Bearer "+s.apiKey)
 	// so I got some troubles with connection probably the reason is my current network
 	// it should not get worse but these settings is needed specifically for me right now
 	transport := &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
 		DialContext: (&net.Dialer{
 			Timeout:   5 * time.Second,
 			KeepAlive: 30 * time.Second,

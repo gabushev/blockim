@@ -59,7 +59,7 @@ func NewChallengeService(cm Challenger, q Quoter) *ChallengeService {
 }
 
 func main() {
-	configPath := flag.String("config", "", "Path to config file")
+	configPath := flag.String("config", "./config.yaml", "Path to config file")
 	flag.Parse()
 
 	cfg, err := config.LoadConfig(*configPath)
@@ -79,7 +79,7 @@ func main() {
 	}
 	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 	server := &http.Server{
-		Addr:    fmt.Sprintf(":%d", cfg.Server.Port),
+		Addr:    fmt.Sprintf("0.0.0.0:%d", cfg.Server.Port),
 		Handler: router,
 	}
 	go func() {

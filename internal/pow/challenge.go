@@ -29,8 +29,8 @@ func (c *Challenge) Deserialize(data string) error {
 		return fmt.Errorf("invalid challenge difficulty: %v", err)
 	}
 	c.Difficulty = difficulty
-	signature := parts[2]
-	c.Signature = signature
+	c.Signature = parts[2]
+	c.Data = parts[0]
 
 	return nil
 }
