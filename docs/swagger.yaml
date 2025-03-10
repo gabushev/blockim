@@ -1,0 +1,108 @@
+basePath: /api
+definitions:
+  types.ChallengeResponse:
+    properties:
+      challenge:
+        description: |-
+          Challenge contains a serialized challenge in "data:difficulty:signature" format
+          example: YWJjZGVmZ2hpamtsbW5vcA==:20:c2lnbmF0dXJl
+        type: string
+    type: object
+  types.ErrorResponse:
+    properties:
+      error:
+        description: |-
+          Error description
+          example: Invalid solution
+        type: string
+    type: object
+  types.QuoteResponse:
+    properties:
+      quote:
+        description: |-
+          Quote is a random quote from
+          example: Not all those who wander are lost.
+        type: string
+    type: object
+  types.SolutionRequest:
+    properties:
+      challenge:
+        description: |-
+          Challenge is a serialized challenge received from the server
+          example: YWJjZGVmZ2hpamtsbW5vcA==:20:c2lnbmF0dXJl
+          required: true
+        type: string
+      nonce:
+        description: |-
+          Nonce is the found solution that satisfies the difficulty condition
+          example: 42387
+          required: true
+        type: string
+    required:
+    - challenge
+    - nonce
+    type: object
+host: localhost:8080
+info:
+  contact: {}
+  description: API server for providing quotes - backed with PoW Armor against DDOS
+  title: Word of Wisdom API
+  version: "1.0"
+paths:
+  /challenge:
+    post:
+      consumes:
+      - application/json
+      description: Generates new Proof of Work challenge
+      operationId: get-challenge
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/types.ChallengeResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+      summary: Get new challenge
+      tags:
+      - challenge
+  /solution:
+    post:
+      consumes:
+      - application/json
+      description: Checks solution by Proof of Work challenge and may return a quote
+        if its correct
+      operationId: submit-solution
+      parameters:
+      - description: Solution for challenge
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/types.SolutionRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/types.QuoteResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+      summary: Send challenge solution
+      tags:
+      - solution
+schemes:
+- http
+- https
+swagger: "2.0"
+tags:
+- description: Operations with Proof of Work challenge
+  name: challenge
+- description: Operations with solutions and getting quotes
+  name: solution

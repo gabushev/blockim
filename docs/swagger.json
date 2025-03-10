@@ -1,0 +1,144 @@
+{
+    "schemes": [
+        "http",
+        "https"
+    ],
+    "swagger": "2.0",
+    "info": {
+        "description": "API server for providing quotes - backed with PoW Armor against DDOS",
+        "title": "Word of Wisdom API",
+        "contact": {},
+        "version": "1.0"
+    },
+    "host": "localhost:8080",
+    "basePath": "/api",
+    "paths": {
+        "/challenge": {
+            "post": {
+                "description": "Generates new Proof of Work challenge",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "challenge"
+                ],
+                "summary": "Get new challenge",
+                "operationId": "get-challenge",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/types.ChallengeResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/types.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/solution": {
+            "post": {
+                "description": "Checks solution by Proof of Work challenge and may return a quote if its correct",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "solution"
+                ],
+                "summary": "Send challenge solution",
+                "operationId": "submit-solution",
+                "parameters": [
+                    {
+                        "description": "Solution for challenge",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/types.SolutionRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/types.QuoteResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/types.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "types.ChallengeResponse": {
+            "type": "object",
+            "properties": {
+                "challenge": {
+                    "description": "Challenge contains a serialized challenge in \"data:difficulty:signature\" format\nexample: YWJjZGVmZ2hpamtsbW5vcA==:20:c2lnbmF0dXJl",
+                    "type": "string"
+                }
+            }
+        },
+        "types.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "description": "Error description\nexample: Invalid solution",
+                    "type": "string"
+                }
+            }
+        },
+        "types.QuoteResponse": {
+            "type": "object",
+            "properties": {
+                "quote": {
+                    "description": "Quote is a random quote from\nexample: Not all those who wander are lost.",
+                    "type": "string"
+                }
+            }
+        },
+        "types.SolutionRequest": {
+            "type": "object",
+            "required": [
+                "challenge",
+                "nonce"
+            ],
+            "properties": {
+                "challenge": {
+                    "description": "Challenge is a serialized challenge received from the server\nexample: YWJjZGVmZ2hpamtsbW5vcA==:20:c2lnbmF0dXJl\nrequired: true",
+                    "type": "string"
+                },
+                "nonce": {
+                    "description": "Nonce is the found solution that satisfies the difficulty condition\nexample: 42387\nrequired: true",
+                    "type": "string"
+                }
+            }
+        }
+    },
+    "tags": [
+        {
+            "description": "Operations with Proof of Work challenge",
+            "name": "challenge"
+        },
+        {
+            "description": "Operations with solutions and getting quotes",
+            "name": "solution"
+        }
+    ]
+}
