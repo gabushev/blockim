@@ -43,7 +43,7 @@ type Service struct {
 	ApiURL      string
 	apiKey      string
 	quotes      []string
-	quotesMu    sync.RWMutex
+	quotesMu    *sync.RWMutex
 	initialized bool
 }
 
@@ -51,7 +51,7 @@ func NewsService(apiURL string, apiKey string) *Service {
 	qs := &Service{
 		ApiURL:      apiURL,
 		apiKey:      apiKey,
-		quotesMu:    sync.RWMutex{},
+		quotesMu:    &sync.RWMutex{},
 		initialized: false,
 	}
 
@@ -78,7 +78,6 @@ func (s *Service) initQuotes() error {
 		return fmt.Errorf("request creation error: %v", err)
 	}
 	log.Printf("making request to %s", s.ApiURL)
-	log.Printf("with api key %s", s.apiKey)
 	req.Header.Add("Accept", "application/json")
 	req.Header.Add("Authorization", "Bearer "+s.apiKey)
 	// so I got some troubles with connection probably the reason is my current network

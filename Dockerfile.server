@@ -1,0 +1,26 @@
+FROM golang:1.22-alpine AS builder
+
+WORKDIR /app
+RUN apk add --no-cache ca-certificates
+COPY go.mod ./
+COPY go.sum ./
+RUN go mod download
+COPY cmd/ ./cmd/
+COPY internal/ ./internal/
+COPY docs/ ./docs/
+
+RUN go build -o server ./cmd/server
+
+FROM alpine:latest
+WORKDIR /app
+RUN apk add --no-cache ca-certificates netcat-openbsd
+COPY --from=builder /app/server .
+COPY config.yaml .
+
+# Default environment variables
+ENV BLOCKIM_SERVER_PORT=8080
+ENV BLOCKIM_POW_DIFFICULTY=20
+ENV BLOCKIM_API_URL="https://the-one-api.dev/v2/quote"
+
+EXPOSE 8080
+CMD ["./server"]
