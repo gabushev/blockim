@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"math/rand"
 	"net"
 	"net/http"
@@ -45,27 +45,29 @@ type Service struct {
 	quotes      []string
 	quotesMu    *sync.RWMutex
 	initialized bool
+	logger      *slog.Logger
 }
 
-func NewsService(apiURL string, apiKey string) *Service {
+func NewService(apiURL string, apiKey string, logger *slog.Logger) *Service {
 	qs := &Service{
 		ApiURL:      apiURL,
 		apiKey:      apiKey,
 		quotesMu:    &sync.RWMutex{},
 		initialized: false,
+		logger:      logger,
 	}
 
 	err := qs.initQuotes()
 	if err != nil {
-		fmt.Errorf("unable to initialize quotes: %v", err)
+		qs.logger.Error("Failed to initialize quotes", "error", err)
 	}
 
 	return qs
 }
 
 func (s *Service) initQuotes() error {
-	if s.apiKey == "" || s.apiKey == "PUT_YOUR_VALID_API_KEY_HERE" {
-		log.Printf("No valid API key provided, using fallback quotes")
+	if s.apiKey == "" {
+		s.logger.Warn("No valid API key provided, using fallback quotes")
 		s.quotesMu.Lock()
 		s.quotes = fallbackQuotes
 		s.quotesMu.Unlock()
@@ -77,7 +79,7 @@ func (s *Service) initQuotes() error {
 	if err != nil {
 		return fmt.Errorf("request creation error: %v", err)
 	}
-	log.Printf("making request to %s", s.ApiURL)
+	s.logger.Debug("Making request to quotes API", "url", s.ApiURL)
 	req.Header.Add("Accept", "application/json")
 	req.Header.Add("Authorization", "Bearer "+s.apiKey)
 	// so I got some troubles with connection probably the reason is my current network
@@ -96,6 +98,7 @@ func (s *Service) initQuotes() error {
 		Timeout:   10 * time.Second,
 	}
 	fallback := func() {
+		s.logger.Warn("Using fallback quotes due to API error")
 		s.quotesMu.Lock()
 		s.quotes = fallbackQuotes
 		s.quotesMu.Unlock()
@@ -103,36 +106,33 @@ func (s *Service) initQuotes() error {
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("error on request, err: %v", err)
+		s.logger.Error("Failed to make API request", "error", err)
 		defer fallback()
-
 		return nil
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		log.Printf("error on quetes request, unexpected response code %d", resp.StatusCode)
-		defer fallback()
 
+	if resp.StatusCode != http.StatusOK {
+		s.logger.Error("Unexpected API response", "status_code", resp.StatusCode)
+		defer fallback()
 		return nil
 	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Printf("error on response reading, err: %v", err)
+		s.logger.Error("Failed to read API response", "error", err)
 		defer fallback()
-
 		return nil
 	}
 
 	var apiResp APIResponse
 	if err := json.Unmarshal(body, &apiResp); err != nil {
-		log.Printf("error on respinse parsing, err: %v", err)
+		s.logger.Error("Failed to parse API response", "error", err)
 		defer fallback()
 		return nil
 	}
 	if len(apiResp.Docs) == 0 {
-		log.Printf("empty quotes response")
+		s.logger.Warn("Empty quotes response from API")
 		defer fallback()
-
 		return nil
 	}
 	s.quotesMu.Lock()
@@ -143,13 +143,16 @@ func (s *Service) initQuotes() error {
 	}
 	s.quotesMu.Unlock()
 	s.initialized = true
-	log.Printf("initialized quotes: %d", len(s.quotes))
+	s.logger.Info("Quotes initialized successfully",
+		"count", len(s.quotes),
+		"source", "api")
 
 	return nil
 }
 
 func (s *Service) GetRandomQuote() (string, error) {
 	if !s.initialized {
+		s.logger.Info("Quotes not initialized, initializing...")
 		err := s.initQuotes()
 		if err != nil {
 			return "", fmt.Errorf("error initializing quotes: %v", err)
@@ -161,8 +164,9 @@ func (s *Service) GetRandomQuote() (string, error) {
 		return "", fmt.Errorf("no quotes available")
 	}
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-
-	return s.quotes[r.Intn(len(s.quotes))], nil
+	quote := s.quotes[r.Intn(len(s.quotes))]
+	s.logger.Debug("Random quote selected", "quote", quote)
+	return quote, nil
 }
 
 func (s *Service) Initialized() bool {

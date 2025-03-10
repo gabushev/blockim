@@ -4,6 +4,8 @@ import (
 	"os"
 	"strconv"
 
+	"blockim/internal/logger"
+
 	"github.com/spf13/viper"
 )
 
@@ -19,6 +21,7 @@ type Config struct {
 		URL string `mapstructure:"url"`
 		Key string `mapstructure:"key"`
 	} `mapstructure:"api"`
+	Logger logger.Config
 }
 
 func LoadConfig(configPath string) (*Config, error) {
@@ -27,6 +30,9 @@ func LoadConfig(configPath string) (*Config, error) {
 	viper.SetDefault("server.port", 8080)
 	viper.SetDefault("pow.secret", "default-secret-key")
 	viper.SetDefault("pow.difficulty", 20)
+	viper.SetDefault("logger.level", "info")
+	viper.SetDefault("logger.output", "stdout")
+	viper.SetDefault("logger.pretty", true)
 
 	if configPath != "" {
 		viper.SetConfigFile(configPath)

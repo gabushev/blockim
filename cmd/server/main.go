@@ -17,7 +17,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -30,6 +30,7 @@ import (
 
 	_ "blockim/docs"
 	"blockim/internal/config"
+	"blockim/internal/logger"
 	"blockim/internal/pow"
 	"blockim/internal/quotes"
 	"blockim/internal/types"
@@ -47,14 +48,16 @@ type Quoter interface {
 }
 
 type ChallengeService struct {
-	cm Challenger
-	q  Quoter
+	cm     Challenger
+	q      Quoter
+	logger *slog.Logger
 }
 
-func NewChallengeService(cm Challenger, q Quoter) *ChallengeService {
+func NewChallengeService(cm Challenger, q Quoter, logger *slog.Logger) *ChallengeService {
 	return &ChallengeService{
-		cm: cm,
-		q:  q,
+		cm:     cm,
+		q:      q,
+		logger: logger,
 	}
 }
 
@@ -64,13 +67,19 @@ func main() {
 
 	cfg, err := config.LoadConfig(*configPath)
 	if err != nil {
-		log.Fatalf("config loaing error: %v", err)
+		logger.Fatal("config loading error", "error", err)
 	}
-	quoter := quotes.NewsService(cfg.API.URL, cfg.API.Key)
+	if err := logger.Setup(cfg.Logger); err != nil {
+		logger.Fatal("Failed to setup logger", "error", err)
+	}
+	log := logger.Get()
+	quoter := quotes.NewService(cfg.API.URL, cfg.API.Key, log)
 	challengeMaker := pow.NewChallengeMaker(cfg.PoW.ServerSecret, cfg.PoW.Difficulty)
-	challengeService := NewChallengeService(challengeMaker, quoter)
+	challengeService := NewChallengeService(challengeMaker, quoter, log)
+	router := gin.New()
+	router.Use(logger.GinMiddleware())
+	router.Use(gin.Recovery())
 
-	router := gin.Default()
 	router.GET("/health", challengeService.healthcheck)
 	api := router.Group("/api")
 	{
@@ -84,31 +93,33 @@ func main() {
 	}
 	go func() {
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Printf("HTTP server error: %v", err)
+			log.Error("HTTP server error", "error", err)
 		}
 	}()
-	log.Printf("HTTP server started on :%d", cfg.Server.Port)
-	log.Printf("Swagger UI available by http://localhost:%d/swagger/index.html", cfg.Server.Port)
+	log.Info("HTTP server started", "port", cfg.Server.Port)
+	log.Info("Swagger UI available", "url", fmt.Sprintf("http://localhost:%d/swagger/index.html", cfg.Server.Port))
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	log.Println("Shutting down server...")
+	log.Info("Shutting down server...")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	if err := server.Shutdown(ctx); err != nil {
-		log.Printf("Server forced to shutdown: %v", err)
+		log.Error("Server forced to shutdown", "error", err)
 	}
 
-	log.Println("Server exiting")
+	log.Info("Server exiting")
 }
 
 func (cs *ChallengeService) healthcheck(c *gin.Context) {
+	log := logger.WithContext(c.Request.Context())
 	isReady := cs.q.Initialized()
 	if !isReady {
+		log.Warn("Health check failed", "reason", "quotes dictionary not ready")
 		c.JSON(http.StatusServiceUnavailable, gin.H{
 			"status": "error",
 			"error":  "quotes dictionary is not ready",
@@ -117,6 +128,7 @@ func (cs *ChallengeService) healthcheck(c *gin.Context) {
 		return
 	}
 
+	log.Info("Health check passed")
 	c.JSON(http.StatusOK, gin.H{
 		"status": "ok",
 		"quotes": "ready",
@@ -134,13 +146,19 @@ func (cs *ChallengeService) healthcheck(c *gin.Context) {
 // @Failure 500 {object} types.ErrorResponse
 // @Router /challenge [post]
 func (cs *ChallengeService) getChallenge(c *gin.Context) {
+	log := logger.WithContext(c.Request.Context())
 	challenge, err := cs.cm.GenerateChallenge()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, types.ErrorResponse{
-			Error: "failed to generate challenge",
-		})
+		log.Error("Failed to generate challenge", "error", err)
+		c.JSON(http.StatusInternalServerError,
+			types.ErrorResponse{Error: "Failed to generate challenge"},
+		)
 		return
 	}
+
+	log.Info("Generated new challenge",
+		"data", challenge.Data,
+		"difficulty", challenge.Difficulty)
 
 	c.JSON(http.StatusOK, types.ChallengeResponse{
 		Challenge: challenge.Serialize(),
@@ -158,28 +176,37 @@ func (cs *ChallengeService) getChallenge(c *gin.Context) {
 // @Failure 400 {object} types.ErrorResponse
 // @Router /solution [post]
 func (cs *ChallengeService) submitSolution(c *gin.Context) {
+	log := logger.WithContext(c.Request.Context())
 	var req types.SolutionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		log.Error("Failed to parse solution request", "error", err)
 		c.JSON(http.StatusBadRequest, types.ErrorResponse{
-			Error: "invalid request format",
-		})
+			Error: "Invalid request body"},
+		)
 		return
 	}
 
 	if !cs.cm.VerifySolution(req.Challenge, req.Nonce) {
+		log.Error("Invalid solution",
+			"challenge", req.Challenge,
+			"nonce", req.Nonce)
 		c.JSON(http.StatusBadRequest, types.ErrorResponse{
-			Error: "invalid solution",
-		})
+			Error: "Invalid solution"},
+		)
 		return
 	}
+
 	quote, err := cs.q.GetRandomQuote()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, types.ErrorResponse{
-			Error: "failed to get random quote",
-		})
+		log.Error("Failed to get quote", "error", err)
+		c.JSON(http.StatusInternalServerError, types.ErrorResponse{Error: "Failed to get quote"})
 		return
 	}
-	c.JSON(http.StatusOK, types.QuoteResponse{
-		Quote: quote,
-	})
+
+	log.Info("Solution verified, quote provided",
+		"challenge", req.Challenge,
+		"nonce", req.Nonce,
+		"quote", quote)
+
+	c.JSON(http.StatusOK, types.QuoteResponse{Quote: quote})
 }
