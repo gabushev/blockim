@@ -8,3 +8,7 @@ pow:
 api:
   url: "https://the-one-api.dev/v2/quote"
   key: "putYourKeyHere"
+
+logger:
+  level: info
+  format: json

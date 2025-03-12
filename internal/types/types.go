@@ -2,12 +2,10 @@
 package types
 
 // ChallengeRequest represents a request to get a new challenge
-// swagger:model
 type ChallengeRequest struct {
 }
 
 // ChallengeResponse represents a response containing a challenge
-// swagger:model
 type ChallengeResponse struct {
 	// Challenge contains a serialized challenge in "data:difficulty:signature" format
 	// example: YWJjZGVmZ2hpamtsbW5vcA==:20:c2lnbmF0dXJl
@@ -15,7 +13,6 @@ type ChallengeResponse struct {
 }
 
 // SolutionRequest represents a request containing a solution
-// swagger:model
 type SolutionRequest struct {
 	// Challenge is a serialized challenge received from the server
 	// example: YWJjZGVmZ2hpamtsbW5vcA==:20:c2lnbmF0dXJl
@@ -29,7 +26,6 @@ type SolutionRequest struct {
 }
 
 // QuoteResponse represents a response containing a quote
-// swagger:model
 type QuoteResponse struct {
 	// Quote is a random quote from
 	// example: Not all those who wander are lost.
@@ -37,7 +33,6 @@ type QuoteResponse struct {
 }
 
 // ErrorResponse represents an error response
-// swagger:model
 type ErrorResponse struct {
 	// Error description
 	// example: Invalid solution

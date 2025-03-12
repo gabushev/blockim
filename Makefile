@@ -1,8 +1,4 @@
-.PHONY: build-server build-client run-server run-client restart-server swagger test
-
-swagger:
-	go install github.com/swaggo/swag/cmd/swag@v1.8.4
-	cd cmd/server && $${HOME}/go/bin/swag init -g main.go --parseDependency --parseInternal --output ../../docs
+.PHONY: build-server build-client run-server run-client restart-server test
 
 test:
 	go test -v ./internal/...
@@ -45,11 +41,10 @@ stop-server:
 	docker stop blockim-server || true
 	docker rm blockim-server || true
 
-restart-server: swagger
+restart-server:
 	docker stop blockim-server || true
 	docker rm blockim-server || true
-	make swagger
 	make build-server
 	make run-server
 
-rebuild: clean swagger build-server build-client
+rebuild: clean build-server build-client

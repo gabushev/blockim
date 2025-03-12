@@ -32,18 +32,15 @@ func (w *remoteWriter) Write(p []byte) (n int, err error) {
 	if err != nil {
 		return 0, err
 	}
-
 	if w.token != "" {
 		req.Header.Set("Authorization", "Bearer "+w.token)
 	}
 	req.Header.Set("Content-Type", "application/json")
-
 	resp, err := w.client.Do(req)
 	if err != nil {
 		return 0, err
 	}
 	defer resp.Body.Close()
-
 	if resp.StatusCode != http.StatusOK {
 		return 0, err
 	}
@@ -54,7 +51,7 @@ func (w *remoteWriter) Write(p []byte) (n int, err error) {
 var logger *slog.Logger
 
 func Setup(cfg Config) error {
-	// ыet default level if not specified
+	// set default level if not specified
 	level := slog.LevelInfo
 	if cfg.Level != "" {
 		switch cfg.Level {

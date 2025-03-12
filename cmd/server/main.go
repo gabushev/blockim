@@ -1,34 +1,20 @@
-// @title Word of Wisdom API
-// @version 1.0
-// @description API server for providing quotes - backed with PoW Armor against DDOS
-// @host localhost:8080
-// @BasePath /api
-// @schemes http https
-//
-// @tag.name challenge
-// @tag.description Operations with Proof of Work challenge
-//
-// @tag.name solution
-// @tag.description Operations with solutions and getting quotes
 package main
 
 import (
+	"bufio"
 	"context"
-	"errors"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
-	"net/http"
+	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
-	"github.com/gin-gonic/gin"
-	swaggerFiles "github.com/swaggo/files"
-	ginSwagger "github.com/swaggo/gin-swagger"
-
-	_ "blockim/docs"
 	"blockim/internal/config"
 	"blockim/internal/logger"
 	"blockim/internal/pow"
@@ -61,13 +47,97 @@ func NewChallengeService(cm Challenger, q Quoter, logger *slog.Logger) *Challeng
 	}
 }
 
+func (sc *ChallengeService) handleConnection(conn net.Conn) {
+	defer conn.Close()
+	sc.logger.Info("New client connected", "addr", conn.RemoteAddr())
+	reader := bufio.NewReader(conn)
+	for {
+		cmd, err := reader.ReadString('\n')
+		if err != nil {
+			if err == io.EOF {
+				sc.logger.Info("Client disconnected", "addr", conn.RemoteAddr())
+				return
+			}
+			sc.logger.Error("Failed to read command", "error", err)
+			return
+		}
+		cmd = strings.TrimSpace(cmd)
+		if len(cmd) == 0 {
+			continue
+		}
+		switch cmd {
+		case "challenge":
+			challenge, err := sc.cm.GenerateChallenge()
+			if err != nil {
+				sc.logger.Error("Failed to generate challenge", "error", err)
+				json.NewEncoder(conn).Encode(types.ErrorResponse{Error: "Failed to generate challenge"})
+				continue
+			}
+			sc.logger.Info("Generated new challenge",
+				"data", challenge.Data,
+				"difficulty", challenge.Difficulty)
+
+			json.NewEncoder(conn).Encode(types.ChallengeResponse{
+				Challenge: challenge.Serialize(),
+			})
+		case "solution":
+			var req types.SolutionRequest
+			if err := json.NewDecoder(reader).Decode(&req); err != nil {
+				sc.logger.Error("Failed to parse solution request", "error", err)
+				json.NewEncoder(conn).Encode(types.ErrorResponse{Error: "Invalid request format"})
+				continue
+			}
+			if !sc.cm.VerifySolution(req.Challenge, req.Nonce) {
+				sc.logger.Error("Invalid solution",
+					"challenge", req.Challenge,
+					"nonce", req.Nonce)
+				json.NewEncoder(conn).Encode(types.ErrorResponse{Error: "Invalid solution"})
+				continue
+			}
+			quote, err := sc.q.GetRandomQuote()
+			if err != nil {
+				sc.logger.Error("Failed to get quote", "error", err)
+				json.NewEncoder(conn).Encode(types.ErrorResponse{Error: "Failed to get quote"})
+				continue
+			}
+			sc.logger.Info("Solution verified, quote provided",
+				"challenge", req.Challenge,
+				"nonce", req.Nonce,
+				"quote", quote)
+			json.NewEncoder(conn).Encode(types.QuoteResponse{Quote: quote})
+		case "health":
+			isReady := sc.q.Initialized()
+			if !isReady {
+				sc.logger.Warn("Health check failed", "reason", "quotes dictionary not ready")
+				json.NewEncoder(conn).Encode(map[string]interface{}{
+					"status": "error",
+					"error":  "quotes dictionary is not ready",
+					"time":   time.Now().Format(time.RFC3339),
+				})
+				continue
+			}
+			sc.logger.Info("Health check passed")
+			json.NewEncoder(conn).Encode(map[string]interface{}{
+				"status": "ok",
+				"quotes": "ready",
+				"time":   time.Now().Format(time.RFC3339),
+			})
+		case "quit":
+			sc.logger.Info("Client disconnected", "addr", conn.RemoteAddr())
+			return
+		default:
+			sc.logger.Warn("Unknown command received", "command", cmd)
+			json.NewEncoder(conn).Encode(types.ErrorResponse{Error: "Unknown command"})
+		}
+	}
+}
+
 func main() {
 	configPath := flag.String("config", "./config.yaml", "Path to config file")
 	flag.Parse()
-
 	cfg, err := config.LoadConfig(*configPath)
 	if err != nil {
-		logger.Fatal("config loading error", "error", err)
+		logger.Fatal("Failed to load config", "error", err)
 	}
 	if err := logger.Setup(cfg.Logger); err != nil {
 		logger.Fatal("Failed to setup logger", "error", err)
@@ -75,138 +145,37 @@ func main() {
 	log := logger.Get()
 	quoter := quotes.NewService(cfg.API.URL, cfg.API.Key, log)
 	challengeMaker := pow.NewChallengeMaker(cfg.PoW.ServerSecret, cfg.PoW.Difficulty)
-	challengeService := NewChallengeService(challengeMaker, quoter, log)
-	router := gin.New()
-	router.Use(logger.GinMiddleware())
-	router.Use(gin.Recovery())
-
-	router.GET("/health", challengeService.healthcheck)
-	api := router.Group("/api")
-	{
-		api.POST("/challenge", challengeService.getChallenge)
-		api.POST("/solution", challengeService.submitSolution)
+	server := NewChallengeService(challengeMaker, quoter, log)
+	listener, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", cfg.Server.Port))
+	if err != nil {
+		log.Error("Failed to start server", "error", err)
+		os.Exit(1)
 	}
-	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
-	server := &http.Server{
-		Addr:    fmt.Sprintf("0.0.0.0:%d", cfg.Server.Port),
-		Handler: router,
-	}
-	go func() {
-		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Error("HTTP server error", "error", err)
-		}
-	}()
-	log.Info("HTTP server started", "port", cfg.Server.Port)
-	log.Info("Swagger UI available", "url", fmt.Sprintf("http://localhost:%d/swagger/index.html", cfg.Server.Port))
-
+	defer listener.Close()
+	log.Info("TCP server started", "port", cfg.Server.Port)
+	// sigterm chan
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-
-	log.Info("Shutting down server...")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-
-	if err := server.Shutdown(ctx); err != nil {
-		log.Error("Server forced to shutdown", "error", err)
-	}
-
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+					log.Error("Failed to accept connection", "error", err)
+					continue
+				}
+			}
+			go server.handleConnection(conn)
+		}
+	}()
+	<-quit
+	log.Info("Shutting down server...")
+	cancel()
+	time.Sleep(time.Second)
 	log.Info("Server exiting")
-}
-
-func (cs *ChallengeService) healthcheck(c *gin.Context) {
-	log := logger.WithContext(c.Request.Context())
-	isReady := cs.q.Initialized()
-	if !isReady {
-		log.Warn("Health check failed", "reason", "quotes dictionary not ready")
-		c.JSON(http.StatusServiceUnavailable, gin.H{
-			"status": "error",
-			"error":  "quotes dictionary is not ready",
-			"time":   time.Now().Format(time.RFC3339),
-		})
-		return
-	}
-
-	log.Info("Health check passed")
-	c.JSON(http.StatusOK, gin.H{
-		"status": "ok",
-		"quotes": "ready",
-		"time":   time.Now().Format(time.RFC3339),
-	})
-}
-
-// @Summary Get new challenge
-// @Description Generates new Proof of Work challenge
-// @ID get-challenge
-// @Tags challenge
-// @Accept json
-// @Produce json
-// @Success 200 {object} types.ChallengeResponse
-// @Failure 500 {object} types.ErrorResponse
-// @Router /challenge [post]
-func (cs *ChallengeService) getChallenge(c *gin.Context) {
-	log := logger.WithContext(c.Request.Context())
-	challenge, err := cs.cm.GenerateChallenge()
-	if err != nil {
-		log.Error("Failed to generate challenge", "error", err)
-		c.JSON(http.StatusInternalServerError,
-			types.ErrorResponse{Error: "Failed to generate challenge"},
-		)
-		return
-	}
-
-	log.Info("Generated new challenge",
-		"data", challenge.Data,
-		"difficulty", challenge.Difficulty)
-
-	c.JSON(http.StatusOK, types.ChallengeResponse{
-		Challenge: challenge.Serialize(),
-	})
-}
-
-// @Summary Send challenge solution
-// @Description Checks solution by Proof of Work challenge and may return a quote if its correct
-// @ID submit-solution
-// @Tags solution
-// @Accept json
-// @Produce json
-// @Param request body types.SolutionRequest true "Solution for challenge"
-// @Success 200 {object} types.QuoteResponse
-// @Failure 400 {object} types.ErrorResponse
-// @Router /solution [post]
-func (cs *ChallengeService) submitSolution(c *gin.Context) {
-	log := logger.WithContext(c.Request.Context())
-	var req types.SolutionRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		log.Error("Failed to parse solution request", "error", err)
-		c.JSON(http.StatusBadRequest, types.ErrorResponse{
-			Error: "Invalid request body"},
-		)
-		return
-	}
-
-	if !cs.cm.VerifySolution(req.Challenge, req.Nonce) {
-		log.Error("Invalid solution",
-			"challenge", req.Challenge,
-			"nonce", req.Nonce)
-		c.JSON(http.StatusBadRequest, types.ErrorResponse{
-			Error: "Invalid solution"},
-		)
-		return
-	}
-
-	quote, err := cs.q.GetRandomQuote()
-	if err != nil {
-		log.Error("Failed to get quote", "error", err)
-		c.JSON(http.StatusInternalServerError, types.ErrorResponse{Error: "Failed to get quote"})
-		return
-	}
-
-	log.Info("Solution verified, quote provided",
-		"challenge", req.Challenge,
-		"nonce", req.Nonce,
-		"quote", quote)
-
-	c.JSON(http.StatusOK, types.QuoteResponse{Quote: quote})
 }

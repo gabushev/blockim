@@ -14,14 +14,14 @@ type Config struct {
 		Port int `mapstructure:"port"`
 	} `mapstructure:"server"`
 	PoW struct {
-		ServerSecret string `mapstructure:"pow_secret"`
+		ServerSecret string `mapstructure:"secret"`
 		Difficulty   int    `mapstructure:"difficulty"`
 	} `mapstructure:"pow"`
 	API struct {
 		URL string `mapstructure:"url"`
 		Key string `mapstructure:"key"`
 	} `mapstructure:"api"`
-	Logger logger.Config
+	Logger logger.Config `mapstructure:"logger"`
 }
 
 func LoadConfig(configPath string) (*Config, error) {

@@ -8,25 +8,24 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - GIN_MODE=release
       - BLOCKIM_API_URL=https://the-one-api.dev/v2/quote
       - BLOCKIM_API_KEY=${API_KEY}
-      - BLOCKIM_SERVER_SECRET=${SERVER_SECRET}
+      - BLOCKIM_POW_SECRET=${SERVER_SECRET}
       - BLOCKIM_POW_DIFFICULTY=${POW_DIFFICULTY:-20}
     healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "8080"]
+      test: ["CMD", "sh", "-c", "echo 'health' | nc -N localhost 8080 | grep -q '\"status\":\"ok\"'"]
       interval: 10s
       timeout: 5s
       retries: 5
-
   client:
     build:
       context: .
       dockerfile: Dockerfile.client
+    environment:
+      SERVER_ADDR: server:8080
     networks:
       - blockim-net
-    environment:
-      - SERVER_ADDR=server:8080
+    command: ["-server", "server:8080"]
     depends_on:
       server:
         condition: service_healthy
