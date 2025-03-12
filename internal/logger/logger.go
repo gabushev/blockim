@@ -2,15 +2,11 @@ package logger
 
 import (
 	"bytes"
-	"context"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"time"
-
-	"github.com/gin-gonic/gin"
-	sloggin "github.com/samber/slog-gin"
 )
 
 type Config struct {
@@ -130,21 +126,4 @@ func Fatal(msg string, args ...any) {
 
 func Get() *slog.Logger {
 	return logger
-}
-
-func WithContext(ctx context.Context) *slog.Logger {
-	if ctx == nil {
-		return logger
-	}
-	if gc, ok := ctx.(*gin.Context); ok {
-		if reqID := gc.GetHeader("X-Request-ID"); reqID != "" {
-			return logger.With(slog.String("request_id", reqID))
-		}
-	}
-
-	return logger
-}
-
-func GinMiddleware() gin.HandlerFunc {
-	return sloggin.New(logger)
 }
